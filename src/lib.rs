@@ -123,6 +123,11 @@ impl Device {
             None => c.get(url).send().await?,
         };
 
+        // Return early if the content hasn't been modified
+        if q.status() == 304 {
+            return Ok(());
+        }
+
         // Store the "etag" value which we use to only get updates
         *etag = q.headers().get(reqwest::header::ETAG).cloned();
 

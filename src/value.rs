@@ -33,6 +33,10 @@ impl Value {
             _ => return Ok(self),
         };
 
+        if s.len() == 0 {
+            return Ok(self);
+        }
+
         // MOTU uses : to deliminate different variables but a name with : is valid so
         // we need to escape : if the key contains :
         // So dumb
@@ -100,7 +104,7 @@ impl TryFrom<SerdeValue> for Value {
             SerdeValue::Number(v) if v.is_u64() => Ok(Value::Int(
                 v.as_u64().ok_or(ValueError::UnableToParseInt)? as i64,
             )),
-            SerdeValue::Number(v) => Err(ValueError::UnableToParseInt),
+            SerdeValue::Number(_) => Err(ValueError::UnableToParseInt),
             SerdeValue::String(v) => Ok(Value::String(v)),
             SerdeValue::Array(_) => Err(ValueError::WTF),
             SerdeValue::Object(_) => Err(ValueError::WTF),
