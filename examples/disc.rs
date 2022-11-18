@@ -1,4 +1,4 @@
-use motu_avb::Device;
+use motu_avb_api::Device;
 use tokio::time::{sleep, Duration};
 
 #[tokio::main]
