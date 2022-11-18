@@ -5,10 +5,14 @@ use tokio::time::{sleep, Duration};
 async fn main() -> anyhow::Result<()> {
     let mut d = Device::discover("624", None).await?;
     dbg!(&d);
-    loop {
-        d.rq().await;
 
-        sleep(Duration::from_millis(30)).await;
+    d.connect().await?;
+
+    loop {
+        sleep(Duration::from_secs(5)).await;
+        let v = d.get();
+        dbg!(v);
     }
+
     Ok(())
 }

@@ -4,12 +4,11 @@ extern crate lazy_static;
 use dashmap::DashMap;
 use rand::Rng;
 use reqwest::header::HeaderValue;
-use serde_json::{json, Value as SerdeValue};
+use serde_json::Value as SerdeValue;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::Mutex;
 
 mod value;
 use value::{Value, ValueError};
@@ -20,10 +19,9 @@ pub struct Device {
     health: String,
     client: reqwest::Client,
 
-    cache: Arc<Mutex<HashMap<String, Value>>>,
+    cache: Arc<DashMap<String, Value>>,
 
     client_id: u32,
-    etag: Option<HeaderValue>,
 }
 
 impl Device {
@@ -69,10 +67,9 @@ impl Device {
             health: format!("http://{}:{}/apiversion", hostname, port),
             client: reqwest::Client::new(),
 
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            cache: Arc::new(DashMap::new()),
 
             client_id: rng.gen::<u32>(),
-            etag: None,
         }
     }
 
@@ -86,11 +83,16 @@ impl Device {
 
         tokio::spawn(async move {
             loop {
-                Self::client(&c, &url, &mut etag, &cache).await;
+                let v = Self::client(&c, &url, &mut etag, &cache).await;
+                dbg!(v);
             }
         });
 
         Ok(())
+    }
+
+    pub fn get(&self) -> Arc<DashMap<String, Value>> {
+        self.cache.clone()
     }
 
     async fn check(&self) -> Result<(), DeviceError> {
@@ -110,7 +112,7 @@ impl Device {
         c: &reqwest::Client,
         url: &str,
         etag: &mut Option<HeaderValue>,
-        cache: &Arc<Mutex<HashMap<String, Value>>>,
+        cache: &Arc<DashMap<String, Value>>,
     ) -> Result<(), DeviceError> {
         // Check if we are long polling
         // If we are long polling, send the etag header we stored
@@ -128,7 +130,6 @@ impl Device {
         let m = q.json::<HashMap<String, SerdeValue>>().await?;
 
         let c = cache.clone();
-        let mut c = c.lock().await;
 
         for item in m.into_iter() {
             let v = Value::try_from(item.1)?.decode(&item.0)?;

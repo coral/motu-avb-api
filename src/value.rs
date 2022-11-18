@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use regex::Regex;
 use serde_json::{json, Value as SerdeValue};
 use thiserror::Error;
@@ -19,7 +18,6 @@ pub enum Value {
     String(String),
     Float(f64),
     Int(i64),
-    Semver(String),
     Bool(bool),
     Enum(MEnum),
     Pair(Vec<String>),
@@ -30,7 +28,7 @@ impl Value {
         // Currently only have to deal with strings lol
         // Why did MOTU have to reinvent JSON?
         // I hate this.
-        let s = match self {
+        let s = match &self {
             Value::String(v) => v,
             _ => return Ok(self),
         };
