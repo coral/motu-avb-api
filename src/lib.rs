@@ -9,9 +9,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::mpsc::{channel, Sender};
 
 mod value;
-use value::{Value, ValueError};
+pub use value::{Value, ValueError};
 
 #[derive(Clone, Debug)]
 pub struct Device {
@@ -19,6 +20,7 @@ pub struct Device {
     health: String,
     client: reqwest::Client,
 
+    conn_cancel: Option<Sender<()>>,
     cache: Arc<DashMap<String, Value>>,
 
     client_id: u32,
@@ -67,24 +69,43 @@ impl Device {
             health: format!("http://{}:{}/apiversion", hostname, port),
             client: reqwest::Client::new(),
 
+            conn_cancel: None,
             cache: Arc::new(DashMap::new()),
 
             client_id: rng.gen::<u32>(),
         }
     }
 
-    pub async fn connect(&self) -> Result<(), DeviceError> {
+    pub async fn connect(&mut self) -> Result<(), DeviceError> {
         self.check().await?;
+
+        let (tx, mut rx) = channel(1);
+        self.conn_cancel = Some(tx);
 
         let c = self.client.clone();
         let url = self.url.clone();
         let mut etag: Option<HeaderValue> = None;
         let cache = self.cache.clone();
+        let client_id = self.client_id;
 
+        // Start background long polling
         tokio::spawn(async move {
             loop {
-                let v = Self::client(&c, &url, &mut etag, &cache).await;
-                dbg!(v);
+                tokio::select! {
+                    // poll
+                    res = Self::poll(&c, &url, &mut etag, client_id, &cache) => {
+                        if let Err(e) = res {
+                            // TODO sort this error handling out
+                            println!("{:?}", e);
+                            return;
+                        }
+                    }
+
+                    // exit if we cancel
+                    _ = rx.recv() => {
+                        return;
+                    }
+                }
             }
         });
 
@@ -108,19 +129,22 @@ impl Device {
         }
     }
 
-    async fn client(
+    async fn poll(
         c: &reqwest::Client,
         url: &str,
         etag: &mut Option<HeaderValue>,
+        client_id: u32,
         cache: &Arc<DashMap<String, Value>>,
     ) -> Result<(), DeviceError> {
         // Check if we are long polling
         // If we are long polling, send the etag header we stored
         // If not just ask for new data
 
+        let c = c.get(url).query(&[("client", client_id)]);
+
         let q = match &etag {
-            Some(v) => c.get(url).header("If-None-Match", v).send().await?,
-            None => c.get(url).send().await?,
+            Some(v) => c.header("If-None-Match", v).send().await?,
+            None => c.send().await?,
         };
 
         // Return early if the content hasn't been modified
@@ -142,6 +166,29 @@ impl Device {
         }
 
         Ok(())
+    }
+
+    pub async fn set(&self, data: &[(&str, &Value)]) -> Result<(), DeviceError> {
+        let mut m = HashMap::new();
+
+        for n in data.iter() {
+            m.insert(n.0.to_string(), n.1.clone());
+        }
+
+        let j = serde_json::to_string(&m).unwrap();
+        dbg!(j);
+        Ok(())
+    }
+
+    pub fn get_value(&self, key: &str) -> Option<Value> {
+        match self.cache.get(key) {
+            Some(v) => Some(v.value().clone()),
+            None => None,
+        }
+    }
+
+    pub fn uid(&self) -> Option<String> {
+        self.get_value("uid").map(Into::into)
     }
 }
 

@@ -1,5 +1,6 @@
 use regex::Regex;
-use serde_json::{json, Value as SerdeValue};
+use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+use serde_json::Value as SerdeValue;
 use thiserror::Error;
 
 lazy_static! {
@@ -12,6 +13,15 @@ pub struct MEnum {
     pub value: i64,
     pub definitions: Vec<(i64, String)>,
 }
+
+// impl Serialize for MEnum {
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: Serializer,
+//     {
+//         serializer.serialize_str(&self.value.to_string())
+//     }
+// }
 
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -82,6 +92,7 @@ impl Value {
         }
 
         // TODO implement real
+        // TODO implement all the other weird shit MOTU stuffed into their key value store
 
         // If not, it's a pair
         Ok(Value::Pair(spliced.iter().map(|f| f.to_string()).collect()))
@@ -109,6 +120,36 @@ impl TryFrom<SerdeValue> for Value {
             SerdeValue::Array(_) => Err(ValueError::WTF),
             SerdeValue::Object(_) => Err(ValueError::WTF),
         }
+    }
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl Into<String> for Value {
+    fn into(self) -> String {
+        match self {
+            Value::String(v) => v,
+            Value::Float(v) => v.to_string(),
+            Value::Int(v) => v.to_string(),
+            Value::Bool(v) => v.to_string(),
+            Value::Enum(v) => v.value.to_string(),
+            Value::Pair(v) => v.join(":"),
+        }
+    }
+}
+
+impl Serialize for Value {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        dbg!(&self);
+        //dbg!(self.to_string());
+        serializer.serialize_str("&*self)")
     }
 }
 
