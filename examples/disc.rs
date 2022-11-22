@@ -19,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
         // .await
         // .unwrap();
         sleep(Duration::from_secs(2)).await;
+        d.find("ext/obank/1");
     }
 
     Ok(())

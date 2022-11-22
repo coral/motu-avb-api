@@ -21,6 +21,7 @@ pub struct Device {
     client: reqwest::Client,
 
     conn_cancel: Option<Sender<()>>,
+
     cache: Arc<DashMap<String, Value>>,
 
     client_id: u32,
@@ -70,6 +71,7 @@ impl Device {
             client: reqwest::Client::new(),
 
             conn_cancel: None,
+
             cache: Arc::new(DashMap::new()),
 
             client_id: rng.gen::<u32>(),
@@ -114,6 +116,14 @@ impl Device {
 
     pub fn get(&self) -> Arc<DashMap<String, Value>> {
         self.cache.clone()
+    }
+
+    pub fn find(&self, key: &str) -> Vec<String> {
+        self.cache
+            .iter()
+            .filter(|f| f.key().contains(key))
+            .map(|vk| vk.key().clone())
+            .collect()
     }
 
     async fn check(&self) -> Result<(), DeviceError> {

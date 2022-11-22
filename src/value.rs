@@ -1,5 +1,5 @@
 use regex::Regex;
-use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+use serde::ser::{Serialize, Serializer};
 use serde_json::Value as SerdeValue;
 use thiserror::Error;
 
@@ -152,7 +152,7 @@ impl Serialize for Value {
         S: Serializer,
     {
         match self {
-            Value::String(v) => serializer.serialize_str(&String::from(self)),
+            Value::String(v) => serializer.serialize_str(v),
             Value::Float(v) => serializer.serialize_f64(*v),
             Value::Int(v) => serializer.serialize_i64(*v),
             Value::Bool(v) => {
