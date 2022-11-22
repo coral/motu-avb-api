@@ -3,7 +3,7 @@ extern crate lazy_static;
 
 use dashmap::DashMap;
 use rand::Rng;
-use reqwest::header::HeaderValue;
+use reqwest::{header::HeaderValue, StatusCode};
 use serde_json::Value as SerdeValue;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -168,16 +168,35 @@ impl Device {
         Ok(())
     }
 
-    pub async fn set(&self, data: &[(&str, &Value)]) -> Result<(), DeviceError> {
+    pub async fn set(&self, data: &[(&str, Value)]) -> Result<(), DeviceError> {
         let mut m = HashMap::new();
 
-        for n in data.iter() {
-            m.insert(n.0.to_string(), n.1.clone());
+        for (key, val) in data.iter() {
+            m.insert(key.to_string(), val.clone());
         }
 
-        let j = serde_json::to_string(&m).unwrap();
-        dbg!(j);
-        Ok(())
+        let form = reqwest::multipart::Form::new().text("json", serde_json::to_string(&m)?);
+
+        let res = self
+            .client
+            .patch(&self.url)
+            .query(&[("client", self.client_id)])
+            .multipart(form)
+            .send()
+            .await?;
+
+        match res.status() {
+            StatusCode::OK | StatusCode::NO_CONTENT => {
+                for (key, val) in data.into_iter() {
+                    self.cache.insert(key.to_string(), val.clone());
+                }
+                Ok(())
+            }
+            _ => Err(DeviceError::BadResponse(
+                res.status().clone(),
+                res.text().await?,
+            )),
+        }
     }
 
     pub fn get_value(&self, key: &str) -> Option<Value> {
@@ -208,8 +227,12 @@ pub enum DiscoveryError {
 pub enum DeviceError {
     #[error(transparent)]
     RequestError(#[from] reqwest::Error),
+    #[error(transparent)]
+    SerializationError(#[from] serde_json::Error),
     #[error("could not connect to device: `{0}`")]
     CouldNotConnect(String),
     #[error(transparent)]
     ValueParsingError(#[from] ValueError),
+    #[error("unexpected response from device: `{0}`: `{1}`")]
+    BadResponse(StatusCode, String),
 }

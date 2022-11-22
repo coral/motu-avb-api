@@ -14,15 +14,6 @@ pub struct MEnum {
     pub definitions: Vec<(i64, String)>,
 }
 
-// impl Serialize for MEnum {
-//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: Serializer,
-//     {
-//         serializer.serialize_str(&self.value.to_string())
-//     }
-// }
-
 #[derive(Clone, Debug)]
 pub enum Value {
     String(String),
@@ -125,14 +116,27 @@ impl TryFrom<SerdeValue> for Value {
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{}", &String::from(self))
     }
 }
 
-impl Into<String> for Value {
-    fn into(self) -> String {
-        match self {
-            Value::String(v) => v,
+impl From<Value> for String {
+    fn from(val: Value) -> String {
+        match val {
+            Value::String(v) => v.clone(),
+            Value::Float(v) => v.to_string(),
+            Value::Int(v) => v.to_string(),
+            Value::Bool(v) => v.to_string(),
+            Value::Enum(v) => v.value.to_string(),
+            Value::Pair(v) => v.join(":"),
+        }
+    }
+}
+
+impl From<&Value> for String {
+    fn from(val: &Value) -> String {
+        match val {
+            Value::String(v) => v.clone(),
             Value::Float(v) => v.to_string(),
             Value::Int(v) => v.to_string(),
             Value::Bool(v) => v.to_string(),
@@ -147,9 +151,20 @@ impl Serialize for Value {
     where
         S: Serializer,
     {
-        dbg!(&self);
-        //dbg!(self.to_string());
-        serializer.serialize_str("&*self)")
+        match self {
+            Value::String(v) => serializer.serialize_str(&String::from(self)),
+            Value::Float(v) => serializer.serialize_f64(*v),
+            Value::Int(v) => serializer.serialize_i64(*v),
+            Value::Bool(v) => {
+                let value = match v {
+                    true => "1",
+                    false => "0",
+                };
+                serializer.serialize_str(&format!("bool:{}", value))
+            }
+            Value::Enum(v) => serializer.serialize_i64(v.value),
+            Value::Pair(_) => serializer.serialize_str(&String::from(self)),
+        }
     }
 }
 

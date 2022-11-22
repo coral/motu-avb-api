@@ -9,22 +9,16 @@ async fn main() -> anyhow::Result<()> {
     d.connect().await?;
 
     loop {
-        //sleep(Duration::from_secs(2)).await;
-        //let v = d.get();
-        dbg!(d.uid());
-
-        d.set(&[
-            ("ext/obank/0/ch/0/stereoTrim", &Value::Float(0.3)),
-            (
-                "ext/obank/0/ch/1/stereoTrim",
-                &Value::String("gaming".to_string()),
-            ),
-        ])
-        .await
-        .unwrap();
-        // d.set(&[("ext/obank/0/ch/0/stereoTrim", "ok")])
-        //     .await
-        //     .unwrap();
+        // d.set(&[
+        //     ("ext/obank/1/ch/0/stereoTrim", Value::Float(-20.0)),
+        //     (
+        //         "ext/obank/0/ch/1/stereoTrim",
+        //         Value::String("gaming".to_string()),
+        //     ),
+        // ])
+        // .await
+        // .unwrap();
+        sleep(Duration::from_secs(2)).await;
     }
 
     Ok(())
