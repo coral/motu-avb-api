@@ -6,37 +6,42 @@ use thiserror::Error;
 use uriparse::Segment;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum BankType {
+pub enum ChannelBankType {
     Input,
     Output,
 }
 
-impl Default for BankType {
+impl Default for ChannelBankType {
     fn default() -> Self {
         Self::Input
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct Bank {
+pub struct ChannelBank {
+    /// The name of the input or output ChannelBank
     pub name: Option<String>,
-    pub t: BankType,
+    /// Input or Output
+    pub t: ChannelBankType,
+    /// Manual says: `For Optical ChannelBanks, either "toslink" or "adat"`
+    /// This however is a lie because the soundcard returns "standard"
+    /// i don't even...
     pub smux: Option<String>,
-
-    /// The number of channels available in this bank at its current sample rate.
+    /// The number of channels available in this ChannelBank at its current sample rate.
     pub num_channels: u32,
-    /// The maximum possible number of channels in the input or output bank.
+    /// The maximum possible number of channels in the input or output ChannelBank.
     pub max_channels: u32,
-    /// The number of channels that the user has enabled for this bank.
+    /// The number of channels that the user has enabled for this ChannelBank.
     pub user_channels: u32,
     /// The number of channels that are actually active. This is always the minimum of
-    /// ext/<ibank_or_obank>/<index>/userCh and ext/<ibank_or_obank>/<index>/userCh.
+    /// ext/<iChannelBank_or_oChannelBank>/<index>/userCh and ext/<iChannelBank_or_oChannelBank>/<index>/userCh.
     pub currenty_active_channels: u32,
 
+    /// Map of all the channels for the ChannelBank
     pub channels: HashMap<u32, ExtChannel>,
 }
 
-impl Bank {
+impl ChannelBank {
     pub fn update(&mut self, key: &[Segment], value: &Value) -> Result<(), ParseError> {
         match key[0].as_str() {
             "name" => self.name = Some(value.to_string()),
@@ -65,16 +70,37 @@ impl Bank {
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct ExtChannel {
-    default_name: Option<String>,
-    name: Option<String>,
-    src: Option<String>,
+    /// Default name of the channel, not even documented in the manual lol
+    pub default_name: Option<String>,
+    /// User set name
+    pub name: Option<String>,
+    /// If the output channel is connected to an input ChannelBank, a ":" separated pair in the form ":"
+    /// otherwise, if unrouted, None
+    pub src: Option<String>,
+    /// Defines trim properties if they are available for the channel
+    pub trim: Option<Trim>,
+    pub pad: Option<bool>,
+    /// True if the signal has its phase inverted. This is only applicable to some input or output channels.
+    pub phase: Option<bool>,
+    /// True if the 48V phantom power is engaged. This is only applicable to some input channels.
+    pub phantom_power: Option<bool>,
+    /// True if the channel has a physical connector plugged in (e.g., an audio jack). This information may not be
+    /// available for all ChannelBanks or devices.
+    pub connection: Option<bool>,
+}
 
-    trim: Option<i32>,
-    trim_range: Option<(i32, i32)>,
-    pad: Option<bool>,
-    phase: Option<bool>,
-    phantom_power: Option<bool>,
-    connection: Option<bool>,
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct TrimValue {
+    /// A dB-value for how much to trim this input or output channel. The range of this parameter is indicated by trim_range
+    pub trim: i32,
+    /// Pair describing the trim range for the channel
+    pub trim_range: (i32, i32),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Trim {
+    Mono(TrimValue),
+    Stereo(TrimValue),
 }
 
 impl ExtChannel {
@@ -83,8 +109,10 @@ impl ExtChannel {
             "defaultName" => self.default_name = value.into(),
             "name" => self.name = value.into(),
             "src" => self.src = value.into(),
-            "trim" => self.trim = Some(value.try_into()?),
-            "trimRange" => self.trim_range = Some(value.try_into()?),
+            "trim" => self.set_mono_trim(value.try_into()?),
+            "trimRange" => self.set_mono_trim_range(value.try_into()?),
+            "stereoTrim" => self.set_stereo_trim(value.try_into()?),
+            "stereoTrimRange" => self.set_stereo_trim_range(value.try_into()?),
             "pad" => self.pad = Some(value.try_into()?),
             "phase" => self.phase = Some(value.try_into()?),
             "48V" => self.phase = Some(value.try_into()?),
@@ -93,36 +121,56 @@ impl ExtChannel {
         }
         Ok(())
     }
+
+    // There must be a better way of doing this
+    // I'm just not good enough at rust yet..
+    fn set_mono_trim(&mut self, val: i32) {
+        if let Trim::Mono(t) = self.trim.get_or_insert(Trim::Mono(TrimValue::default())) {
+            t.trim = val;
+        }
+    }
+    fn set_mono_trim_range(&mut self, val: (i32, i32)) {
+        if let Trim::Mono(t) = self.trim.get_or_insert(Trim::Mono(TrimValue::default())) {
+            t.trim_range = val;
+        }
+    }
+    fn set_stereo_trim(&mut self, val: i32) {
+        if let Trim::Stereo(t) = self.trim.get_or_insert(Trim::Mono(TrimValue::default())) {
+            t.trim = val;
+        }
+    }
+    fn set_stereo_trim_range(&mut self, val: (i32, i32)) {
+        if let Trim::Stereo(t) = self.trim.get_or_insert(Trim::Mono(TrimValue::default())) {
+            t.trim_range = val;
+        }
+    }
 }
 
-pub fn seed(cache: Arc<DashMap<String, Value>>) -> Result<(), ParseError> {
-    let mut ibank: HashMap<u32, Bank> = HashMap::new();
+pub fn build(
+    prefix: &str,
+    cache: Arc<DashMap<String, Value>>,
+) -> Result<HashMap<u32, ChannelBank>, ParseError> {
+    let mut ChannelBank: HashMap<u32, ChannelBank> = HashMap::new();
 
     for item in cache.iter() {
-        let k: &str = item.key();
-        let m = uriparse::URIReference::try_from(k)?;
+        let m = uriparse::URIReference::try_from(item.key() as &str)?;
         let k = m.path().segments();
 
         let value = item.value();
 
-        if k.len() > 2 && k[1] == "ibank" {
+        if k.len() > 2 && k[1] == prefix {
             let index = k[2].parse::<u32>()?;
 
-            let b = ibank.entry(index).or_insert(Bank {
-                t: BankType::Input,
+            let b = ChannelBank.entry(index).or_insert(ChannelBank {
+                t: ChannelBankType::Input,
                 ..Default::default()
             });
 
-            //let v = k[3..];
-
             b.update(&k[3..], value)?;
-            //ibank.contains_key(2)
         }
     }
 
-    dbg!(ibank);
-
-    Ok(())
+    Ok(ChannelBank)
 }
 
 #[derive(Error, Debug)]
@@ -132,6 +180,9 @@ pub enum ParseError {
 
     #[error("not enough data in segment")]
     NotEnoughDataInSegment,
+
+    #[error("wtf")]
+    WTF,
 
     #[error(transparent)]
     ParseIntError(#[from] std::num::ParseIntError),

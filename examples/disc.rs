@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
         sleep(Duration::from_secs(2)).await;
         dbg!(d.find("ext/ibank/0/ch/0/"));
 
-        dbg!(motu_avb_api::definitions::seed(d.get()));
+        //dbg!(motu_avb_api::definitions::seed(d.get()));
 
         //let m = d.find("ext/ibank/0");
 

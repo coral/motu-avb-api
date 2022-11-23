@@ -2,6 +2,7 @@
 extern crate lazy_static;
 
 use dashmap::DashMap;
+use definitions::{ChannelBank, ParseError};
 use rand::Rng;
 use reqwest::{header::HeaderValue, StatusCode};
 use serde_json::Value as SerdeValue;
@@ -24,6 +25,9 @@ pub struct Device {
     conn_cancel: Option<Sender<()>>,
 
     cache: Arc<DashMap<String, Value>>,
+
+    input_banks: HashMap<u32, ChannelBank>,
+    output_banks: HashMap<u32, ChannelBank>,
 
     client_id: u32,
 }
@@ -75,6 +79,9 @@ impl Device {
 
             cache: Arc::new(DashMap::new()),
 
+            input_banks: HashMap::new(),
+            output_banks: HashMap::new(),
+
             client_id: rng.gen::<u32>(),
         }
     }
@@ -91,8 +98,15 @@ impl Device {
         let cache = self.cache.clone();
         let client_id = self.client_id;
 
+        let (cached_tx, cached_rx) = tokio::sync::oneshot::channel();
+
         // Start background long polling
         tokio::spawn(async move {
+            // Initial cache pass
+            let res = Self::poll(&c, &url, &mut etag, client_id, &cache).await;
+            cached_tx.send(res);
+
+            // Long polling
             loop {
                 tokio::select! {
                     // poll
@@ -112,7 +126,15 @@ impl Device {
             }
         });
 
-        Ok(())
+        // Build mappings once we ready
+        match cached_rx.await? {
+            Ok(_) => {
+                self.input_banks = definitions::build("ibank", self.cache.clone())?;
+                self.output_banks = definitions::build("obank", self.cache.clone())?;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     pub fn get(&self) -> Arc<DashMap<String, Value>> {
@@ -245,6 +267,10 @@ pub enum DeviceError {
     CouldNotConnect(String),
     #[error(transparent)]
     ValueParsingError(#[from] ValueError),
+    #[error(transparent)]
+    DefinitionParsingError(#[from] ParseError),
     #[error("unexpected response from device: `{0}`: `{1}`")]
     BadResponse(StatusCode, String),
+    #[error(transparent)]
+    OneShotRecvError(#[from] tokio::sync::oneshot::error::RecvError),
 }
