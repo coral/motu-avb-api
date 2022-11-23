@@ -114,6 +114,60 @@ impl TryFrom<SerdeValue> for Value {
     }
 }
 
+impl TryFrom<&Value> for u32 {
+    type Error = ValueError;
+    fn try_from(val: &Value) -> Result<Self, Self::Error> {
+        match val {
+            Value::String(v) => Ok(v.parse::<u32>()?),
+            Value::Int(v) => Ok(*v as u32),
+            _ => Err(ValueError::NoCasting),
+        }
+    }
+}
+
+impl TryFrom<&Value> for i32 {
+    type Error = ValueError;
+    fn try_from(val: &Value) -> Result<Self, Self::Error> {
+        match val {
+            Value::String(v) => Ok(v.parse::<i32>()?),
+            Value::Int(v) => Ok(*v as i32),
+            _ => Err(ValueError::NoCasting),
+        }
+    }
+}
+
+impl TryFrom<&Value> for (i32, i32) {
+    type Error = ValueError;
+    fn try_from(val: &Value) -> Result<Self, Self::Error> {
+        match val {
+            Value::Pair(v) => Ok((v[0].parse::<i32>()?, v[1].parse::<i32>()?)),
+            _ => Err(ValueError::NoCasting),
+        }
+    }
+}
+
+impl TryFrom<&Value> for bool {
+    type Error = ValueError;
+    fn try_from(val: &Value) -> Result<Self, Self::Error> {
+        match val {
+            Value::Bool(v) => Ok(*v),
+            Value::Int(v) => match v {
+                0 => Ok(false),
+                1 => Ok(true),
+                _ => Err(ValueError::NoCasting),
+            },
+            Value::String(v) => match v.as_str() {
+                "0" => Ok(false),
+                "1" => Ok(true),
+                "false" => Ok(false),
+                "true" => Ok(true),
+                _ => Err(ValueError::NoCasting),
+            },
+            _ => Err(ValueError::NoCasting),
+        }
+    }
+}
+
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", &String::from(self))
@@ -142,6 +196,17 @@ impl From<&Value> for String {
             Value::Bool(v) => v.to_string(),
             Value::Enum(v) => v.value.to_string(),
             Value::Pair(v) => v.join(":"),
+        }
+    }
+}
+
+impl From<&Value> for Option<String> {
+    fn from(val: &Value) -> Option<String> {
+        let tg = val.to_string();
+        if tg != "" {
+            return Some(tg);
+        } else {
+            return None;
         }
     }
 }
@@ -178,6 +243,8 @@ pub enum ValueError {
     NoValue,
     #[error("this value should not exist")]
     WTF,
+    #[error("could not cast")]
+    NoCasting,
     #[error(transparent)]
     ParseIntError(#[from] std::num::ParseIntError),
 }

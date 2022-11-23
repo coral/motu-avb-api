@@ -13,6 +13,7 @@ use tokio::sync::mpsc::{channel, Sender};
 
 mod value;
 pub use value::{Value, ValueError};
+pub mod definitions;
 
 #[derive(Clone, Debug)]
 pub struct Device {
@@ -118,11 +119,12 @@ impl Device {
         self.cache.clone()
     }
 
-    pub fn find(&self, key: &str) -> Vec<String> {
+    /// Simple method to search for a key, basiclaly .contains() helper for the backing map
+    pub fn find(&self, key: &str) -> Vec<(String, Value)> {
         self.cache
             .iter()
             .filter(|f| f.key().contains(key))
-            .map(|vk| vk.key().clone())
+            .map(|vk| (vk.key().clone(), vk.value().clone()))
             .collect()
     }
 

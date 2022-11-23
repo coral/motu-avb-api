@@ -19,7 +19,13 @@ async fn main() -> anyhow::Result<()> {
         // .await
         // .unwrap();
         sleep(Duration::from_secs(2)).await;
-        d.find("ext/obank/1");
+        dbg!(d.find("ext/ibank/0/ch/0/"));
+
+        dbg!(motu_avb_api::definitions::seed(d.get()));
+
+        //let m = d.find("ext/ibank/0");
+
+        //motu_avb_api::definitions::Bank::try_from(&m);
     }
 
     Ok(())

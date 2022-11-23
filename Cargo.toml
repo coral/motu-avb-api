@@ -16,6 +16,7 @@ rand = "0.8.5"
 regex = "1.7.0"
 lazy_static = "1.4.0"
 dashmap = { version = "5.4.0", features = ["serde"] }
+uriparse = "0.6.4"
 
 [dev-dependencies]
 anyhow = "1.0.53"
