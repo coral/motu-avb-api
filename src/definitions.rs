@@ -19,6 +19,7 @@ impl Default for ChannelBankType {
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct ChannelBank {
+    pub index: u32,
     /// The name of the input or output ChannelBank
     pub name: Option<String>,
     /// Input or Output
@@ -33,12 +34,37 @@ pub struct ChannelBank {
     pub max_channels: u32,
     /// The number of channels that the user has enabled for this ChannelBank.
     pub user_channels: u32,
-    /// The number of channels that are actually active. This is always the minimum of
-    /// ext/<iChannelBank_or_oChannelBank>/<index>/userCh and ext/<iChannelBank_or_oChannelBank>/<index>/userCh.
+    /// The number of channels that are actually active.
     pub currenty_active_channels: u32,
 
     /// Map of all the channels for the ChannelBank
     pub channels: HashMap<u32, ExtChannel>,
+}
+
+impl std::fmt::Display for ChannelBank {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match &self.name {
+            Some(v) => format!(" {},", v),
+            None => "-".to_string(),
+        };
+
+        let channels: String = self
+            .channels
+            .iter()
+            .map(|(i, v)| format!("- {}: {}\n", i, v.to_string()))
+            .collect();
+
+        write!(
+            f,
+            "{}:{}  Channels: {}, Active Channels: {}, Max Channels: {}\n{}",
+            self.index,
+            name,
+            self.num_channels,
+            self.currenty_active_channels,
+            self.max_channels,
+            channels
+        )
+    }
 }
 
 impl ChannelBank {
@@ -87,6 +113,59 @@ pub struct ExtChannel {
     /// True if the channel has a physical connector plugged in (e.g., an audio jack). This information may not be
     /// available for all ChannelBanks or devices.
     pub connection: Option<bool>,
+}
+
+impl std::fmt::Display for ExtChannel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let n = match &self.name {
+            Some(v) => v,
+            None => match &self.default_name {
+                Some(v) => v,
+                None => "",
+            },
+        };
+
+        let trim = match &self.trim {
+            Some(v) => match v {
+                Trim::Mono(t) => format!(
+                    " Stereo Trim: {}, Range: {}:{}",
+                    t.trim, t.trim_range.0, t.trim_range.1
+                ),
+                Trim::Stereo(t) => format!(
+                    " Trim: {}, Range: {}:{}",
+                    t.trim, t.trim_range.0, t.trim_range.1
+                ),
+            },
+            None => "".to_string(),
+        };
+
+        let source = match &self.src {
+            Some(v) => format!(" Source: {}", v),
+            None => "".to_string(),
+        };
+
+        let ph = match &self.phantom_power {
+            Some(v) => format!(" Phantom Power: {}", v),
+            None => "".to_string(),
+        };
+
+        let pad = match &self.pad {
+            Some(v) => format!(" Pad: {}", v),
+            None => "".to_string(),
+        };
+
+        let phase = match &self.phase {
+            Some(v) => format!(" Phase: {}", v),
+            None => "".to_string(),
+        };
+
+        let conn = match &self.connection {
+            Some(v) => format!(" Connection: {}", v),
+            None => "".to_string(),
+        };
+
+        write!(f, "{}: {}{}{}{}{}{}", n, source, trim, ph, pad, phase, conn)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -162,6 +241,7 @@ pub fn build(
             let index = k[2].parse::<u32>()?;
 
             let b = channel_bank.entry(index).or_insert(ChannelBank {
+                index,
                 t: ChannelBankType::Input,
                 ..Default::default()
             });

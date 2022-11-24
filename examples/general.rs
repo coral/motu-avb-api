@@ -16,24 +16,18 @@ async fn main() -> anyhow::Result<()> {
     //
     // Device::new("My Device", "192.168.10.15", 80, motu_avb_api::DeviceType::Device)
 
-    // d.set(&[
-    //     ("ext/obank/1/ch/0/stereoTrim", Value::Float(-20.0)),
-    //     (
-    //         "ext/obank/0/ch/1/stereoTrim",
-    //         Value::String("gaming".to_string()),
-    //     ),
-    // ])
-    // .await
-    // .unwrap();
-    sleep(Duration::from_secs(2)).await;
-    //dbg!(d.find("ext/ibank/0/ch/0/"));
+    // Lets have a look at the first input channel bank
+    let channel_bank = d.input_banks.get(&0).unwrap();
+    print!("{}", channel_bank);
 
-    //dbg!(motu_avb_api::definitions::seed(d.get()));
+    let mut updates = d.updates()?;
+    tokio::spawn(async move {
+        loop {
+            let (k, v) = updates.recv().await.unwrap();
+            println!("update for {} : {}", k, v);
+        }
+    });
 
-    //let m = d.find("ext/ibank/0");
-
-    //motu_avb_api::definitions::Bank::try_from(&m);
-    dbg!(d.input_banks);
-
+    sleep(Duration::from_secs(10)).await;
     Ok(())
 }

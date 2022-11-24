@@ -34,7 +34,7 @@ pub struct Device {
     conn_cancel: Option<Sender<()>>,
 
     cache: Arc<DashMap<String, Value>>,
-    updates: Option<tokio::sync::broadcast::Sender<Value>>,
+    updates: Option<tokio::sync::broadcast::Sender<(String, Value)>>,
 
     pub input_banks: HashMap<u32, ChannelBank>,
     pub output_banks: HashMap<u32, ChannelBank>,
@@ -219,7 +219,9 @@ impl Device {
         self.port
     }
 
-    pub fn updates(&self) -> Result<tokio::sync::broadcast::Receiver<Value>, DeviceError> {
+    pub fn updates(
+        &self,
+    ) -> Result<tokio::sync::broadcast::Receiver<(String, Value)>, DeviceError> {
         match self.connected {
             true => Ok(self
                 .updates
@@ -244,14 +246,14 @@ impl Device {
 
         let (cached_tx, cached_rx) = tokio::sync::oneshot::channel();
 
-        let (update_tx, update_rx) = tokio::sync::broadcast::channel(64);
+        let (update_tx, _) = tokio::sync::broadcast::channel(64);
         self.updates = Some(update_tx.clone());
 
         // Start background long polling
         tokio::spawn(async move {
             // Initial cache pass
             let res = Self::poll(&c, &url, &mut etag, client_id, &cache, &update_tx).await;
-            cached_tx.send(res);
+            let _ = cached_tx.send(res);
 
             // Long polling
             loop {
@@ -318,7 +320,7 @@ impl Device {
         etag: &mut Option<HeaderValue>,
         client_id: u32,
         cache: &Arc<DashMap<String, Value>>,
-        updates: &tokio::sync::broadcast::Sender<Value>,
+        updates: &tokio::sync::broadcast::Sender<(String, Value)>,
     ) -> Result<(), DeviceError> {
         // Check if we are long polling
         // If we are long polling, send the etag header we stored
@@ -346,8 +348,8 @@ impl Device {
 
         for item in m.into_iter() {
             let v = Value::try_from(item.1)?.decode(&item.0)?;
-            c.insert(item.0, v.clone());
-            updates.send(v);
+            c.insert(item.0.clone(), v.clone());
+            let _ = updates.send((item.0, v));
         }
 
         Ok(())
