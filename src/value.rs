@@ -225,7 +225,7 @@ impl Serialize for Value {
                     true => "1",
                     false => "0",
                 };
-                serializer.serialize_str(&format!("bool:{}", value))
+                serializer.serialize_str(&format!("{}", value))
             }
             Value::Enum(v) => serializer.serialize_i64(v.value),
             Value::Pair(_) => serializer.serialize_str(&String::from(self)),

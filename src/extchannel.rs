@@ -93,6 +93,26 @@ impl std::fmt::Display for ChannelBank {
     }
 }
 
+macro_rules! set_mac {
+    (
+    $(#[$meta:meta])*
+    $func_name:ident, $vy:ty) => {
+        $(#[$meta])*
+        pub fn $func_name(&self, index: u32, v: $vy) -> Option<Request> {
+            match self.channels.get(&index) {
+                Some(c) => add_optional_req(
+                    c.$func_name(v),
+                    Request {
+                        key: format!("{}/ch", self.seg()),
+                        val: Value::Bool(false),
+                    },
+                ),
+                None => None,
+            }
+        }
+    };
+}
+
 impl ChannelBank {
     pub fn update(&mut self, key: &[Segment], value: &Value) -> Result<(), ParseError> {
         match key[0].as_str() {
@@ -120,6 +140,7 @@ impl ChannelBank {
         Ok(())
     }
 
+    /// Generates a set channel bank name request
     pub fn set_name(&self, name: &str) -> Request {
         Request {
             key: format!("{}/name", self.seg()),
@@ -127,6 +148,7 @@ impl ChannelBank {
         }
     }
 
+    /// Generates a set channel name request
     pub fn set_channel_name(&self, index: u32, name: &str) -> Request {
         Request {
             key: format!("{}/ch/{}/name", self.seg(), index,),
@@ -134,6 +156,8 @@ impl ChannelBank {
         }
     }
 
+    /// Generates a set channel trim request
+    /// Returns None if the channel doesn't allow trim or if the trim is outside acceptable range
     pub fn set_channel_trim(&self, index: u32, trim: i32) -> Option<Request> {
         match self.channels.get(&index) {
             Some(c) => add_optional_req(
@@ -146,6 +170,10 @@ impl ChannelBank {
             None => None,
         }
     }
+
+    set_mac!(set_pad, bool);
+    set_mac!(set_phase, bool);
+    set_mac!(set_phantom_power, bool);
 }
 
 impl PathSeg for ChannelBank {
@@ -237,6 +265,12 @@ pub struct TrimValue {
     pub trim_range: (i32, i32),
 }
 
+impl TrimValue {
+    pub fn within_range(&self, v: i32) -> bool {
+        v > self.trim_range.0 && v < self.trim_range.1
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Trim {
     Mono(TrimValue),
@@ -286,17 +320,50 @@ impl ExtChannel {
     }
 
     pub fn set_trim(&self, trim: i32) -> Option<Request> {
-        match &self.trim {
+        let (key, t) = match &self.trim {
             Some(v) => match v {
-                Trim::Mono(_) => Some(Request {
-                    key: format!("{}/trim", self.index),
-                    val: Value::Int(trim as i64),
-                }),
-                Trim::Stereo(_) => Some(Request {
-                    key: format!("{}/stereoTrim", self.index),
-                    val: Value::Int(trim as i64),
-                }),
+                Trim::Mono(t) => (format!("{}/trim", self.index), t),
+                Trim::Stereo(t) => (format!("{}/stereoTrim", self.index), t),
             },
+            None => return None,
+        };
+
+        if !t.within_range(trim) {
+            return None;
+        }
+
+        Some(Request {
+            key,
+            val: Value::Int(trim as i64),
+        })
+    }
+
+    pub fn set_pad(&self, v: bool) -> Option<Request> {
+        match self.pad {
+            Some(_) => Some(Request {
+                key: format!("{}/pad", self.index),
+                val: Value::Bool(v),
+            }),
+            None => None,
+        }
+    }
+
+    pub fn set_phase(&self, v: bool) -> Option<Request> {
+        match self.phase {
+            Some(_) => Some(Request {
+                key: format!("{}/phase", self.index),
+                val: Value::Bool(v),
+            }),
+            None => None,
+        }
+    }
+
+    pub fn set_phantom_power(&self, v: bool) -> Option<Request> {
+        match self.phantom_power {
+            Some(_) => Some(Request {
+                key: format!("{}/48V", self.index),
+                val: Value::Bool(v),
+            }),
             None => None,
         }
     }

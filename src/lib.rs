@@ -3,7 +3,7 @@ extern crate lazy_static;
 
 use async_zeroconf::Service;
 use dashmap::DashMap;
-use definitions::{ChannelBank, ParseError};
+use extchannel::{ChannelBank, ParseError};
 use rand::Rng;
 use reqwest::{header::HeaderValue, StatusCode};
 use serde_json::Value as SerdeValue;
@@ -15,7 +15,7 @@ use tokio::sync::mpsc::{channel, Sender};
 
 mod value;
 pub use value::{Value, ValueError};
-pub mod definitions;
+pub mod extchannel;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -280,8 +280,8 @@ impl Device {
         // Build mappings once we ready
         match cached_rx.await? {
             Ok(_) => {
-                self.input_banks = definitions::build("ibank", self.cache.clone())?;
-                self.output_banks = definitions::build("obank", self.cache.clone())?;
+                self.input_banks = extchannel::build("ibank", self.cache.clone())?;
+                self.output_banks = extchannel::build("obank", self.cache.clone())?;
                 Ok(())
             }
             Err(e) => Err(e),
