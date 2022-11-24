@@ -24,6 +24,8 @@ pub struct Device {
     hostname: String,
     port: u16,
 
+    connected: bool,
+
     url: String,
     health: String,
     device_type: DeviceType,
@@ -32,7 +34,7 @@ pub struct Device {
     conn_cancel: Option<Sender<()>>,
 
     cache: Arc<DashMap<String, Value>>,
-    updates: Option<tokio::sync::broadcast::Receiver<Value>>,
+    updates: Option<tokio::sync::broadcast::Sender<Value>>,
 
     pub input_banks: HashMap<u32, ChannelBank>,
     pub output_banks: HashMap<u32, ChannelBank>,
@@ -162,6 +164,8 @@ impl Device {
             hostname: hostname.to_string(),
             port,
 
+            connected: false,
+
             url: format!("http://{}:{}/datastore", hostname, port),
             health: format!("http://{}:{}/apiversion", hostname, port),
             device_type,
@@ -215,6 +219,17 @@ impl Device {
         self.port
     }
 
+    pub fn updates(&self) -> Result<tokio::sync::broadcast::Receiver<Value>, DeviceError> {
+        match self.connected {
+            true => Ok(self
+                .updates
+                .as_ref()
+                .ok_or(DeviceError::NotConnected)?
+                .subscribe()),
+            false => Err(DeviceError::NotConnected),
+        }
+    }
+
     pub async fn connect(&mut self) -> Result<(), DeviceError> {
         self.check().await?;
 
@@ -230,7 +245,7 @@ impl Device {
         let (cached_tx, cached_rx) = tokio::sync::oneshot::channel();
 
         let (update_tx, update_rx) = tokio::sync::broadcast::channel(64);
-        self.updates = Some(update_rx);
+        self.updates = Some(update_tx.clone());
 
         // Start background long polling
         tokio::spawn(async move {
@@ -257,6 +272,8 @@ impl Device {
                 }
             }
         });
+
+        self.connected = true;
 
         // Build mappings once we ready
         match cached_rx.await? {
@@ -405,6 +422,8 @@ pub enum DeviceError {
     SerializationError(#[from] serde_json::Error),
     #[error("could not connect to device: `{0}`")]
     CouldNotConnect(String),
+    #[error("no connected to device yet, run connect?")]
+    NotConnected,
     #[error(transparent)]
     ValueParsingError(#[from] ValueError),
     #[error(transparent)]
