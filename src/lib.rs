@@ -135,7 +135,7 @@ impl Device {
             match resolved_service
                 .txt()
                 .iter()
-                .find(|(k, v)| k.contains("motu.mdns.type"))
+                .find(|(k, _)| k.contains("motu.mdns.type"))
             {
                 Some((_, v)) => {
                     let d = std::str::from_utf8(v)?;
@@ -355,7 +355,11 @@ impl Device {
         Ok(())
     }
 
-    pub async fn set(&self, data: &[(&str, Value)]) -> Result<(), DeviceError> {
+    pub async fn set(&self, r: Request) -> Result<(), DeviceError> {
+        self.set_keys(&[(r.key.as_str(), r.val)]).await
+    }
+
+    pub async fn set_keys(&self, data: &[(&str, Value)]) -> Result<(), DeviceError> {
         let mut m = HashMap::new();
 
         for (key, val) in data.iter() {
@@ -395,6 +399,23 @@ impl Device {
 
     pub fn uid(&self) -> Option<String> {
         self.get_value("uid").map(Into::into)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct Request {
+    key: String,
+    val: Value,
+}
+
+impl std::ops::Add for Request {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Self {
+            key: format!("{}/{}", self.key, other.key),
+            val: other.val,
+        }
     }
 }
 

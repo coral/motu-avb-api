@@ -8,13 +8,13 @@ lazy_static! {
     static ref NAME_ESCAPE_MATCHER: Regex = Regex::new(r"(?i)(name)").unwrap();
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MEnum {
     pub value: i64,
     pub definitions: Vec<(i64, String)>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Value {
     String(String),
     Float(f64),

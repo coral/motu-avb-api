@@ -1,9 +1,14 @@
 use crate::value::{Value, ValueError};
+use crate::Request;
 use dashmap::DashMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use uriparse::Segment;
+
+pub trait PathSeg {
+    fn seg(&self) -> String;
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChannelBankType {
@@ -11,9 +16,30 @@ pub enum ChannelBankType {
     Output,
 }
 
+impl TryFrom<&str> for ChannelBankType {
+    type Error = ParseError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "ibank" => Ok(Self::Input),
+            "obank" => Ok(Self::Output),
+            _ => Err(ParseError::NotAbleToParseBankType(value.to_string())),
+        }
+    }
+}
+
 impl Default for ChannelBankType {
     fn default() -> Self {
         Self::Input
+    }
+}
+
+impl PathSeg for ChannelBankType {
+    fn seg(&self) -> String {
+        match self {
+            ChannelBankType::Input => "ibank".to_string(),
+            ChannelBankType::Output => "obank".to_string(),
+        }
     }
 }
 
@@ -78,10 +104,11 @@ impl ChannelBank {
             "smux" => self.smux = Some(value.to_string()),
             "ch" => {
                 if key.len() >= 3 {
-                    let ch = self
-                        .channels
-                        .entry(key[1].parse::<u32>()?)
-                        .or_insert(ExtChannel::default());
+                    let i = key[1].parse::<u32>()?;
+                    let ch = self.channels.entry(i).or_insert(ExtChannel {
+                        index: i,
+                        ..Default::default()
+                    });
                     ch.update(&key[2..], value)?;
                 } else {
                     return Err(ParseError::NotEnoughDataInSegment);
@@ -92,10 +119,44 @@ impl ChannelBank {
 
         Ok(())
     }
+
+    pub fn set_name(&self, name: &str) -> Request {
+        Request {
+            key: format!("{}/name", self.seg()),
+            val: Value::String(name.to_string()),
+        }
+    }
+
+    pub fn set_channel_name(&self, index: u32, name: &str) -> Request {
+        Request {
+            key: format!("{}/ch/{}/name", self.seg(), index,),
+            val: Value::String(name.to_string()),
+        }
+    }
+
+    pub fn set_channel_trim(&self, index: u32, trim: i32) -> Option<Request> {
+        match self.channels.get(&index) {
+            Some(c) => add_optional_req(
+                c.set_trim(trim),
+                Request {
+                    key: format!("{}/ch", self.seg()),
+                    val: Value::Bool(false),
+                },
+            ),
+            None => None,
+        }
+    }
+}
+
+impl PathSeg for ChannelBank {
+    fn seg(&self) -> String {
+        format!("ext/{}/{}", self.t.seg(), self.index)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct ExtChannel {
+    pub index: u32,
     /// Default name of the channel, not even documented in the manual lol
     pub default_name: Option<String>,
     /// User set name
@@ -214,13 +275,29 @@ impl ExtChannel {
         }
     }
     fn set_stereo_trim(&mut self, val: i32) {
-        if let Trim::Stereo(t) = self.trim.get_or_insert(Trim::Mono(TrimValue::default())) {
+        if let Trim::Stereo(t) = self.trim.get_or_insert(Trim::Stereo(TrimValue::default())) {
             t.trim = val;
         }
     }
     fn set_stereo_trim_range(&mut self, val: (i32, i32)) {
-        if let Trim::Stereo(t) = self.trim.get_or_insert(Trim::Mono(TrimValue::default())) {
+        if let Trim::Stereo(t) = self.trim.get_or_insert(Trim::Stereo(TrimValue::default())) {
             t.trim_range = val;
+        }
+    }
+
+    pub fn set_trim(&self, trim: i32) -> Option<Request> {
+        match &self.trim {
+            Some(v) => match v {
+                Trim::Mono(_) => Some(Request {
+                    key: format!("{}/trim", self.index),
+                    val: Value::Int(trim as i64),
+                }),
+                Trim::Stereo(_) => Some(Request {
+                    key: format!("{}/stereoTrim", self.index),
+                    val: Value::Int(trim as i64),
+                }),
+            },
+            None => None,
         }
     }
 }
@@ -242,7 +319,7 @@ pub fn build(
 
             let b = channel_bank.entry(index).or_insert(ChannelBank {
                 index,
-                t: ChannelBankType::Input,
+                t: ChannelBankType::try_from(prefix)?,
                 ..Default::default()
             });
 
@@ -251,6 +328,13 @@ pub fn build(
     }
 
     Ok(channel_bank)
+}
+
+fn add_optional_req(l: Option<Request>, r: Request) -> Option<Request> {
+    match l {
+        Some(o) => Some(r + o),
+        None => None,
+    }
 }
 
 #[derive(Error, Debug)]
@@ -263,7 +347,8 @@ pub enum ParseError {
 
     #[error("wtf")]
     WTF,
-
+    #[error("was not able to parse bank type: `{0}`")]
+    NotAbleToParseBankType(String),
     #[error(transparent)]
     ParseIntError(#[from] std::num::ParseIntError),
     #[error(transparent)]
