@@ -2,8 +2,11 @@
 name = "motu_avb_api"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT"
+keywords = ["motu", "avb", "api", "control"]
+categories = ["api-bindings"]
+description = "Control the MOTU AVB soundcards from Rust"
+repository = "https://github.com/coral/motu-avb-api"
 
 [dependencies]
 reqwest = { version = "0.11.13", features = ["json", "multipart"] }
