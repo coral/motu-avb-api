@@ -1,14 +1,15 @@
 #[macro_use]
 extern crate lazy_static;
 
+use async_zeroconf::Service;
 use dashmap::DashMap;
 use definitions::{ChannelBank, ParseError};
 use rand::Rng;
 use reqwest::{header::HeaderValue, StatusCode};
 use serde_json::Value as SerdeValue;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{collections::HashMap, fmt::Display};
 use thiserror::Error;
 use tokio::sync::mpsc::{channel, Sender};
 
@@ -16,24 +17,84 @@ mod value;
 pub use value::{Value, ValueError};
 pub mod definitions;
 
-#[derive(Clone, Debug)]
+#[allow(dead_code)]
+#[derive(Debug)]
 pub struct Device {
+    name: String,
+    hostname: String,
+    port: u16,
+
     url: String,
     health: String,
+    device_type: DeviceType,
     client: reqwest::Client,
 
     conn_cancel: Option<Sender<()>>,
 
     cache: Arc<DashMap<String, Value>>,
+    updates: Option<tokio::sync::broadcast::Receiver<Value>>,
 
-    input_banks: HashMap<u32, ChannelBank>,
-    output_banks: HashMap<u32, ChannelBank>,
+    pub input_banks: HashMap<u32, ChannelBank>,
+    pub output_banks: HashMap<u32, ChannelBank>,
 
     client_id: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DeviceType {
+    Host,
+    Device,
+    Unknown,
+}
+
+impl From<&str> for DeviceType {
+    fn from(value: &str) -> Self {
+        match value {
+            "netiodevice" => DeviceType::Device,
+            "netiohost" => DeviceType::Host,
+            _ => DeviceType::Unknown,
+        }
+    }
+}
+
+impl Display for DeviceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let t = match self {
+            DeviceType::Host => "Host",
+            DeviceType::Device => "Device",
+            DeviceType::Unknown => "Unknown",
+        };
+        write!(f, "{}", t)
+    }
+}
+
+impl Display for Device {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Name: \"{}\"  Type: {}  Hostname: {}:{}",
+            self.name,
+            self.device_type.to_string(),
+            self.hostname,
+            self.port
+        )
+    }
+}
+
+impl PartialEq for Device {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.hostname == other.hostname
+            && self.port == other.port
+            && self.device_type == other.device_type
+    }
+}
+
 impl Device {
-    pub async fn discover(name: &str, timeout: Option<Duration>) -> Result<Device, DiscoveryError> {
+    pub async fn from_name(
+        name: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Device, DiscoveryError> {
         // Default duration of 10 secs
         let timeout = match timeout {
             Some(v) => v,
@@ -47,43 +108,111 @@ impl Device {
             if v.name() == name {
                 let resolved_service = async_zeroconf::ServiceResolver::r(&v).await?;
 
-                return Ok(Self::new(
-                    &format!(
-                        "{}.{}",
-                        resolved_service
-                            .host()
-                            .as_ref()
-                            .ok_or(DiscoveryError::NoHost)?,
-                        resolved_service
-                            .domain()
-                            .as_ref()
-                            .ok_or(DiscoveryError::NoDomain)?
-                    ),
-                    resolved_service.port(),
-                ));
+                return Self::new_from_mdns(&resolved_service);
             }
         }
 
-        Err(DiscoveryError::NoDeviceDiscovered(name.to_string()))
+        Err(DiscoveryError::NoDeviceWithNameDiscovered(name.to_string()))
     }
 
-    pub fn new(hostname: &str, port: u16) -> Device {
+    pub async fn discover(timeout: Option<Duration>) -> Result<Vec<Device>, DiscoveryError> {
+        // Default duration of 10 secs
+        let timeout = match timeout {
+            Some(v) => v,
+            None => Duration::from_secs(10),
+        };
+
+        let mut browser = async_zeroconf::ServiceBrowserBuilder::new("_http._tcp");
+        let mut services = browser.timeout(timeout).browse()?;
+
+        let mut devices = Vec::new();
+
+        while let Some(Ok(v)) = services.recv().await {
+            let resolved_service = async_zeroconf::ServiceResolver::r(&v).await?;
+
+            match resolved_service
+                .txt()
+                .iter()
+                .find(|(k, v)| k.contains("motu.mdns.type"))
+            {
+                Some((_, v)) => {
+                    let d = std::str::from_utf8(v)?;
+                    if d.contains("netiodevice") || d.contains("netiohost") {
+                        let nd = Self::new_from_mdns(&resolved_service)?;
+                        if devices.iter().find(|v| **v == nd).is_none() {
+                            devices.push(nd);
+                        }
+                    }
+                }
+                None => {}
+            };
+        }
+
+        match devices.len() {
+            0 => Err(DiscoveryError::NoDevice),
+            _ => Ok(devices),
+        }
+    }
+
+    pub fn new(name: &str, hostname: &str, port: u16, device_type: DeviceType) -> Device {
         let mut rng = rand::thread_rng();
 
         Device {
+            name: name.to_string(),
+            hostname: hostname.to_string(),
+            port,
+
             url: format!("http://{}:{}/datastore", hostname, port),
             health: format!("http://{}:{}/apiversion", hostname, port),
+            device_type,
             client: reqwest::Client::new(),
 
             conn_cancel: None,
 
             cache: Arc::new(DashMap::new()),
+            updates: None,
 
             input_banks: HashMap::new(),
             output_banks: HashMap::new(),
 
             client_id: rng.gen::<u32>(),
         }
+    }
+
+    fn new_from_mdns(r: &Service) -> Result<Self, DiscoveryError> {
+        let mtype = match r.txt().iter().find(|(k, _)| k.eq(&"motu.mdns.type")) {
+            Some((_, v)) => std::str::from_utf8(&v)?,
+            None => return Err(DiscoveryError::DeviceType),
+        };
+
+        let device_type: DeviceType = From::from(mtype);
+
+        Ok(Self::new(
+            r.name(),
+            &format!(
+                "{}.{}",
+                r.host().as_ref().ok_or(DiscoveryError::NoHost)?,
+                r.domain().as_ref().ok_or(DiscoveryError::NoDomain)?
+            ),
+            r.port(),
+            device_type,
+        ))
+    }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn device_type(&self) -> DeviceType {
+        self.device_type
+    }
+
+    pub fn hostname(&self) -> String {
+        self.hostname.clone()
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
     }
 
     pub async fn connect(&mut self) -> Result<(), DeviceError> {
@@ -100,17 +229,20 @@ impl Device {
 
         let (cached_tx, cached_rx) = tokio::sync::oneshot::channel();
 
+        let (update_tx, update_rx) = tokio::sync::broadcast::channel(64);
+        self.updates = Some(update_rx);
+
         // Start background long polling
         tokio::spawn(async move {
             // Initial cache pass
-            let res = Self::poll(&c, &url, &mut etag, client_id, &cache).await;
+            let res = Self::poll(&c, &url, &mut etag, client_id, &cache, &update_tx).await;
             cached_tx.send(res);
 
             // Long polling
             loop {
                 tokio::select! {
                     // poll
-                    res = Self::poll(&c, &url, &mut etag, client_id, &cache) => {
+                    res = Self::poll(&c, &url, &mut etag, client_id, &cache, &update_tx) => {
                         if let Err(e) = res {
                             // TODO sort this error handling out
                             println!("{:?}", e);
@@ -142,7 +274,7 @@ impl Device {
     }
 
     /// Simple method to search for a key, basiclaly .contains() helper for the backing map
-    pub fn find(&self, key: &str) -> Vec<(String, Value)> {
+    pub fn find_key(&self, key: &str) -> Vec<(String, Value)> {
         self.cache
             .iter()
             .filter(|f| f.key().contains(key))
@@ -169,6 +301,7 @@ impl Device {
         etag: &mut Option<HeaderValue>,
         client_id: u32,
         cache: &Arc<DashMap<String, Value>>,
+        updates: &tokio::sync::broadcast::Sender<Value>,
     ) -> Result<(), DeviceError> {
         // Check if we are long polling
         // If we are long polling, send the etag header we stored
@@ -196,7 +329,8 @@ impl Device {
 
         for item in m.into_iter() {
             let v = Value::try_from(item.1)?.decode(&item.0)?;
-            c.insert(item.0, v);
+            c.insert(item.0, v.clone());
+            updates.send(v);
         }
 
         Ok(())
@@ -249,12 +383,18 @@ impl Device {
 pub enum DiscoveryError {
     #[error(transparent)]
     ZeroconfError(#[from] async_zeroconf::ZeroconfError),
+    #[error(transparent)]
+    UTF8CastError(#[from] std::str::Utf8Error),
     #[error("no host discovered?")]
     NoHost,
     #[error("no domain discovered?")]
     NoDomain,
+    #[error("could not determine device type")]
+    DeviceType,
     #[error("no device with name: `{0}` discovered")]
-    NoDeviceDiscovered(String),
+    NoDeviceWithNameDiscovered(String),
+    #[error("no motu devices discovered")]
+    NoDevice,
 }
 
 #[derive(Error, Debug)]

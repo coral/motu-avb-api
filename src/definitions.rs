@@ -150,7 +150,7 @@ pub fn build(
     prefix: &str,
     cache: Arc<DashMap<String, Value>>,
 ) -> Result<HashMap<u32, ChannelBank>, ParseError> {
-    let mut ChannelBank: HashMap<u32, ChannelBank> = HashMap::new();
+    let mut channel_bank: HashMap<u32, ChannelBank> = HashMap::new();
 
     for item in cache.iter() {
         let m = uriparse::URIReference::try_from(item.key() as &str)?;
@@ -161,7 +161,7 @@ pub fn build(
         if k.len() > 2 && k[1] == prefix {
             let index = k[2].parse::<u32>()?;
 
-            let b = ChannelBank.entry(index).or_insert(ChannelBank {
+            let b = channel_bank.entry(index).or_insert(ChannelBank {
                 t: ChannelBankType::Input,
                 ..Default::default()
             });
@@ -170,7 +170,7 @@ pub fn build(
         }
     }
 
-    Ok(ChannelBank)
+    Ok(channel_bank)
 }
 
 #[derive(Error, Debug)]
