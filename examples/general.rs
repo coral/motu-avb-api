@@ -17,15 +17,13 @@ async fn main() -> anyhow::Result<()> {
     // Device::new("My Device", "192.168.10.15", 80, motu_avb_api::DeviceType::Device)
 
     // Lets have a look at the first input channel bank
-    let channel_bank = d.input_banks.get(&0).unwrap();
-    print!("{}", channel_bank);
+    let channel_bank = d.input_banks()?;
+    print!("{}", channel_bank.get(&0).unwrap().value());
 
     // Now lets change the volume of the first trimmable output
 
-    dbg!(&d.output_banks.get(&0));
-
     let req = d
-        .output_banks
+        .output_banks()?
         .get(&0)
         .unwrap()
         .set_channel_trim(0, -30)

@@ -372,8 +372,8 @@ impl ExtChannel {
 pub fn build(
     prefix: &str,
     cache: Arc<DashMap<String, Value>>,
-) -> Result<HashMap<u32, ChannelBank>, ParseError> {
-    let mut channel_bank: HashMap<u32, ChannelBank> = HashMap::new();
+) -> Result<DashMap<u32, ChannelBank>, ParseError> {
+    let channel_bank: DashMap<u32, ChannelBank> = DashMap::new();
 
     for item in cache.iter() {
         let m = uriparse::URIReference::try_from(item.key() as &str)?;
@@ -384,7 +384,7 @@ pub fn build(
         if k.len() > 2 && k[1] == prefix {
             let index = k[2].parse::<u32>()?;
 
-            let b = channel_bank.entry(index).or_insert(ChannelBank {
+            let mut b = channel_bank.entry(index).or_insert(ChannelBank {
                 index,
                 t: ChannelBankType::try_from(prefix)?,
                 ..Default::default()

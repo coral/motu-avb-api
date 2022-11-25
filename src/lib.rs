@@ -36,8 +36,8 @@ pub struct Device {
     cache: Arc<DashMap<String, Value>>,
     updates: Option<tokio::sync::broadcast::Sender<(String, Value)>>,
 
-    pub input_banks: HashMap<u32, ChannelBank>,
-    pub output_banks: HashMap<u32, ChannelBank>,
+    input_banks: Option<Arc<DashMap<u32, ChannelBank>>>,
+    output_banks: Option<Arc<DashMap<u32, ChannelBank>>>,
 
     client_id: u32,
 }
@@ -176,8 +176,8 @@ impl Device {
             cache: Arc::new(DashMap::new()),
             updates: None,
 
-            input_banks: HashMap::new(),
-            output_banks: HashMap::new(),
+            input_banks: None,
+            output_banks: None,
 
             client_id: rng.gen::<u32>(),
         }
@@ -217,6 +217,22 @@ impl Device {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    pub fn input_banks(&self) -> Result<Arc<DashMap<u32, ChannelBank>>, DeviceError> {
+        Ok(self
+            .input_banks
+            .as_ref()
+            .ok_or(DeviceError::ChannelBanksNotInitalized)?
+            .clone())
+    }
+
+    pub fn output_banks(&self) -> Result<Arc<DashMap<u32, ChannelBank>>, DeviceError> {
+        Ok(self
+            .output_banks
+            .as_ref()
+            .ok_or(DeviceError::ChannelBanksNotInitalized)?
+            .clone())
     }
 
     pub fn updates(
@@ -280,8 +296,8 @@ impl Device {
         // Build mappings once we ready
         match cached_rx.await? {
             Ok(_) => {
-                self.input_banks = extchannel::build("ibank", self.cache.clone())?;
-                self.output_banks = extchannel::build("obank", self.cache.clone())?;
+                self.input_banks = Some(Arc::new(extchannel::build("ibank", self.cache.clone())?));
+                self.output_banks = Some(Arc::new(extchannel::build("obank", self.cache.clone())?));
                 Ok(())
             }
             Err(e) => Err(e),
@@ -455,4 +471,6 @@ pub enum DeviceError {
     BadResponse(StatusCode, String),
     #[error(transparent)]
     OneShotRecvError(#[from] tokio::sync::oneshot::error::RecvError),
+    #[error("channel banks have not been built yet, did you run connect?")]
+    ChannelBanksNotInitalized,
 }
