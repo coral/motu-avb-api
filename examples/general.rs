@@ -1,10 +1,10 @@
-use motu_avb_api::{Device, Update};
+use motu_avb_api::Update;
 use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Find by specifying device name
-    let mut d = Device::from_name("624", None).await?;
+    let mut d = motu_avb_api::from_name("624", None).await?;
     d.connect().await?;
 
     // Or discover avaliable devices on the network
