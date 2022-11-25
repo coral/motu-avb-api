@@ -1,4 +1,4 @@
-use motu_avb_api::Device;
+use motu_avb_api::{Device, Update};
 use tokio::time::{sleep, Duration};
 
 #[tokio::main]
@@ -36,8 +36,14 @@ async fn main() -> anyhow::Result<()> {
     let mut updates = d.updates()?;
     tokio::spawn(async move {
         loop {
-            let (k, v) = updates.recv().await.unwrap();
-            println!("update for {} : {}", k, v);
+            let update = updates.recv().await.unwrap();
+
+            // Only listen for updates that happened outside our application
+            // If you really want every update you can listen to both internal and external
+            match update {
+                Update::External(k, v) => println!("update for {} : {}", k, v),
+                _ => {}
+            };
         }
     });
 

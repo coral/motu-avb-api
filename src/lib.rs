@@ -34,7 +34,7 @@ pub struct Device {
     conn_cancel: Option<Sender<()>>,
 
     cache: Arc<DashMap<String, Value>>,
-    updates: Option<tokio::sync::broadcast::Sender<(String, Value)>>,
+    updates: Option<tokio::sync::broadcast::Sender<Update>>,
 
     input_banks: Option<Arc<DashMap<u32, ChannelBank>>>,
     output_banks: Option<Arc<DashMap<u32, ChannelBank>>>,
@@ -47,6 +47,12 @@ pub enum DeviceType {
     Host,
     Device,
     Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum Update {
+    Internal(String, Value),
+    External(String, Value),
 }
 
 impl From<&str> for DeviceType {
@@ -235,9 +241,7 @@ impl Device {
             .clone())
     }
 
-    pub fn updates(
-        &self,
-    ) -> Result<tokio::sync::broadcast::Receiver<(String, Value)>, DeviceError> {
+    pub fn updates(&self) -> Result<tokio::sync::broadcast::Receiver<Update>, DeviceError> {
         match self.connected {
             true => Ok(self
                 .updates
@@ -308,6 +312,8 @@ impl Device {
         self.cache.clone()
     }
 
+    //fn mapped_updates() {}
+
     /// Simple method to search for a key, basiclaly .contains() helper for the backing map
     pub fn find_key(&self, key: &str) -> Vec<(String, Value)> {
         self.cache
@@ -336,7 +342,7 @@ impl Device {
         etag: &mut Option<HeaderValue>,
         client_id: u32,
         cache: &Arc<DashMap<String, Value>>,
-        updates: &tokio::sync::broadcast::Sender<(String, Value)>,
+        updates: &tokio::sync::broadcast::Sender<Update>,
     ) -> Result<(), DeviceError> {
         // Check if we are long polling
         // If we are long polling, send the etag header we stored
@@ -365,7 +371,7 @@ impl Device {
         for item in m.into_iter() {
             let v = Value::try_from(item.1)?.decode(&item.0)?;
             c.insert(item.0.clone(), v.clone());
-            let _ = updates.send((item.0, v));
+            let _ = updates.send(Update::External(item.0, v));
         }
 
         Ok(())
@@ -394,6 +400,7 @@ impl Device {
 
         match res.status() {
             StatusCode::OK | StatusCode::NO_CONTENT => {
+                // Update our internal cache
                 for (key, val) in data.into_iter() {
                     self.cache.insert(key.to_string(), val.clone());
                 }
