@@ -55,6 +55,15 @@ pub enum Update {
     External(String, Value),
 }
 
+impl Update {
+    pub fn any(self) -> (String, Value) {
+        match self {
+            Update::Internal(k, v) => (k, v),
+            Update::External(k, v) => (k, v),
+        }
+    }
+}
+
 impl From<&str> for DeviceType {
     fn from(value: &str) -> Self {
         match value {
@@ -266,7 +275,7 @@ impl Device {
 
         let (cached_tx, cached_rx) = tokio::sync::oneshot::channel();
 
-        let (update_tx, _) = tokio::sync::broadcast::channel(64);
+        let (update_tx, mut map_update) = tokio::sync::broadcast::channel(64);
         self.updates = Some(update_tx.clone());
 
         // Start background long polling
@@ -302,10 +311,27 @@ impl Device {
             Ok(_) => {
                 self.input_banks = Some(Arc::new(extchannel::build("ibank", self.cache.clone())?));
                 self.output_banks = Some(Arc::new(extchannel::build("obank", self.cache.clone())?));
-                Ok(())
             }
-            Err(e) => Err(e),
-        }
+            Err(e) => return Err(e),
+        };
+
+        tokio::spawn(async move {
+            loop {
+                let upd = match map_update.recv().await {
+                    Ok(v) => v,
+                    Err(e) => match e {
+                        tokio::sync::broadcast::error::RecvError::Closed => return,
+                        tokio::sync::broadcast::error::RecvError::Lagged(_) => continue,
+                    },
+                };
+
+                let (k, v) = upd.any();
+
+                // todo update channel banks here
+            }
+        });
+
+        Ok(())
     }
 
     pub fn get(&self) -> Arc<DashMap<String, Value>> {
@@ -403,6 +429,9 @@ impl Device {
                 // Update our internal cache
                 for (key, val) in data.into_iter() {
                     self.cache.insert(key.to_string(), val.clone());
+                    if let Some(upd) = &self.updates {
+                        upd.send(Update::Internal(key.to_string(), val.clone()))?;
+                    }
                 }
                 Ok(())
             }
@@ -480,4 +509,6 @@ pub enum DeviceError {
     OneShotRecvError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("channel banks have not been built yet, did you run connect?")]
     ChannelBanksNotInitalized,
+    #[error(transparent)]
+    BroadcastError(#[from] tokio::sync::broadcast::error::SendError<Update>),
 }
