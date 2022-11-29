@@ -25,11 +25,20 @@ async fn main() -> anyhow::Result<()> {
     let req = d
         .output_banks()?
         .get(&0)
-        .unwrap()
+        .expect("can't find first output bank?")
         .set_channel_trim(0, -30)
         .unwrap();
 
     let _ = d.set(req).await;
+
+    // Let's see if this change happened!
+    println!(
+        "{}",
+        d.output_banks()?
+            .get(&0)
+            .expect("can't find first output bank?")
+            .value()
+    );
 
     // You can also listen to updates!
 
