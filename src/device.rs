@@ -1,4 +1,4 @@
-use crate::extchannel::{self, ChannelBank, ParseError};
+use crate::extchannel::{self, ChannelBank, ChannelBankType, ParseError};
 use crate::value::{Value, ValueError};
 use dashmap::DashMap;
 use rand::Rng;
@@ -45,6 +45,40 @@ pub enum DeviceType {
 pub enum Update {
     Internal(String, Value),
     External(String, Value),
+}
+
+#[allow(dead_code)]
+enum KeyType {
+    InputBank(u32),
+    OutputBank(u32),
+    Mixer,
+    AVB,
+    NotImplemented,
+}
+
+impl KeyType {
+    fn convert_from_str(key: &str) -> Result<(Self, uriparse::URIReference), DeviceError> {
+        let m = uriparse::URIReference::try_from(key)?;
+        let k = m.path().segments();
+        if k.len() > 2 {
+            let k = match k[0].as_str() {
+                "ext" => {
+                    let index = k[2].parse::<u32>()?;
+                    match ChannelBankType::try_from(k[1].as_str())? {
+                        ChannelBankType::Input => KeyType::InputBank(index),
+                        ChannelBankType::Output => KeyType::OutputBank(index),
+                    }
+                }
+                "avb" => KeyType::AVB,
+                "mix" => KeyType::Mixer,
+                _ => KeyType::NotImplemented,
+            };
+
+            return Ok((k, m));
+        };
+
+        Err(DeviceError::KeyParseError)
+    }
 }
 
 impl Update {
@@ -224,6 +258,10 @@ impl Device {
             Err(e) => return Err(e),
         };
 
+        let update_input_bank = self.input_banks.clone().unwrap();
+        let update_output_bank = self.input_banks.clone().unwrap();
+
+        // Listen to updates and map that to our internal representations
         tokio::spawn(async move {
             loop {
                 let upd = match map_update.recv().await {
@@ -234,9 +272,30 @@ impl Device {
                     },
                 };
 
-                let (k, v) = upd.any();
+                let (k, value) = upd.any();
 
-                // todo update channel banks here
+                if let Ok((tk, uri)) = KeyType::convert_from_str(k.as_str()) {
+                    let k = uri.path().segments();
+                    match tk {
+                        KeyType::InputBank(index) => {
+                            match update_input_bank.get_mut(&index) {
+                                Some(mut v) => {
+                                    v.update(&k[3..], &value).unwrap();
+                                }
+                                None => {}
+                            };
+                        }
+                        KeyType::OutputBank(index) => {
+                            match update_output_bank.get_mut(&index) {
+                                Some(mut v) => {
+                                    v.update(&k[3..], &value).unwrap();
+                                }
+                                None => {}
+                            };
+                        }
+                        _ => {}
+                    }
+                }
             }
         });
 
@@ -383,6 +442,12 @@ pub enum DeviceError {
     OneShotRecvError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("channel banks have not been built yet, did you run connect?")]
     ChannelBanksNotInitalized,
+    #[error("could not parse key, not big")]
+    KeyParseError,
     #[error(transparent)]
     BroadcastError(#[from] tokio::sync::broadcast::error::SendError<Update>),
+    #[error(transparent)]
+    URIParseError(#[from] uriparse::URIReferenceError),
+    #[error(transparent)]
+    ParseIntError(#[from] std::num::ParseIntError),
 }
