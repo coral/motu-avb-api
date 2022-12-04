@@ -51,7 +51,7 @@ pub async fn discover(timeout: Option<Duration>) -> Result<Vec<Device>, Discover
                 if d.contains("netiodevice") || d.contains("netiohost") {
                     let nd = new_from_mdns(&resolved_service)?;
                     if devices.iter().find(|v| **v == nd).is_none() {
-                        devices.push(nd);
+                        devices.push(nd.clone());
                     }
                 }
             }
@@ -63,6 +63,73 @@ pub async fn discover(timeout: Option<Duration>) -> Result<Vec<Device>, Discover
         0 => Err(DiscoveryError::NoDevice),
         _ => Ok(devices),
     }
+}
+
+#[allow(dead_code)]
+pub async fn streaming_discover(
+    timeout: Option<Duration>,
+) -> Result<tokio::sync::mpsc::Receiver<Result<Device, DiscoveryError>>, DiscoveryError> {
+    let (tx, rx) = tokio::sync::mpsc::channel(10);
+
+    // Default duration of 10 secs
+    let timeout = match timeout {
+        Some(v) => v,
+        None => Duration::from_secs(20),
+    };
+
+    let mut browser = async_zeroconf::ServiceBrowserBuilder::new("_http._tcp");
+    let mut services = browser.timeout(timeout).browse()?;
+
+    let mut devices = Vec::new();
+
+    tokio::spawn(async move {
+        while let Some(Ok(v)) = services.recv().await {
+            let resolved_service = match async_zeroconf::ServiceResolver::r(&v).await {
+                Ok(v) => v,
+                Err(e) => {
+                    tx.send(Err(DiscoveryError::ZeroconfError(e)))
+                        .await
+                        .unwrap();
+                    continue;
+                }
+            };
+
+            match resolved_service
+                .txt()
+                .iter()
+                .find(|(k, _)| k.contains("motu.mdns.type"))
+            {
+                Some((_, v)) => {
+                    let d = match std::str::from_utf8(v) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tx.send(Err(DiscoveryError::UTF8CastError(e)))
+                                .await
+                                .unwrap();
+                            continue;
+                        }
+                    };
+
+                    if d.contains("netiodevice") || d.contains("netiohost") {
+                        let nd = match new_from_mdns(&resolved_service) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                tx.send(Err(e)).await.unwrap();
+                                continue;
+                            }
+                        };
+                        if devices.iter().find(|v| **v == nd).is_none() {
+                            devices.push(nd.clone());
+                            tx.send(Ok(nd)).await.unwrap();
+                        }
+                    }
+                }
+                None => {}
+            };
+        }
+    });
+
+    Ok(rx)
 }
 
 fn new_from_mdns(r: &Service) -> Result<Device, DiscoveryError> {

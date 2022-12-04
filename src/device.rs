@@ -10,7 +10,7 @@ use thiserror::Error;
 use tokio::sync::mpsc::{channel, Sender};
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Device {
     name: String,
     hostname: String,
