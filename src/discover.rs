@@ -1,7 +1,13 @@
 use crate::device::Device;
 use async_zeroconf::Service;
+use regex::Regex;
+use std::collections::HashSet;
 use std::time::Duration;
 use thiserror::Error;
+
+lazy_static! {
+    static ref BOOL_MATCHER: Regex = Regex::new(r"MOTU Pro Audio HTTP Host: (.*)").unwrap();
+}
 
 #[allow(dead_code)]
 pub async fn from_name(name: &str, timeout: Option<Duration>) -> Result<Device, DiscoveryError> {
@@ -37,6 +43,7 @@ pub async fn discover(timeout: Option<Duration>) -> Result<Vec<Device>, Discover
     let mut services = browser.timeout(timeout).browse()?;
 
     let mut devices = Vec::new();
+    let mut found: HashSet<String> = HashSet::new();
 
     while let Some(Ok(v)) = services.recv().await {
         let resolved_service = async_zeroconf::ServiceResolver::r(&v).await?;
@@ -48,9 +55,10 @@ pub async fn discover(timeout: Option<Duration>) -> Result<Vec<Device>, Discover
         {
             Some((_, v)) => {
                 let d = std::str::from_utf8(v)?;
-                if d.contains("netiodevice") || d.contains("netiohost") {
+                if d.contains("netiodevice") {
                     let nd = new_from_mdns(&resolved_service)?;
-                    if devices.iter().find(|v| **v == nd).is_none() {
+                    if !found.contains(nd.uid()) {
+                        found.insert(nd.uid().to_string());
                         devices.push(nd.clone());
                     }
                 }
@@ -110,7 +118,7 @@ pub async fn streaming_discover(
                         }
                     };
 
-                    if d.contains("netiodevice") || d.contains("netiohost") {
+                    if d.contains("netiodevice") {
                         let nd = match new_from_mdns(&resolved_service) {
                             Ok(v) => v,
                             Err(e) => {
@@ -140,6 +148,20 @@ fn new_from_mdns(r: &Service) -> Result<Device, DiscoveryError> {
 
     let device_type: crate::device::DeviceType = From::from(mtype);
 
+    let uid = match device_type {
+        crate::device::DeviceType::Host => {
+            let cap = BOOL_MATCHER
+                .captures(r.name())
+                .ok_or(DiscoveryError::NoUIDForHost(r.name().to_string()))?;
+            cap[1].to_string()
+        }
+        crate::device::DeviceType::Device => match r.txt().iter().find(|(k, _)| k.eq(&"uid")) {
+            Some((_, v)) => std::str::from_utf8(&v)?.to_string(),
+            None => return Err(DiscoveryError::DeviceType),
+        },
+        crate::device::DeviceType::Unknown => "UNKNOWN (this is a bug)".to_string(),
+    };
+
     Ok(Device::new(
         r.name(),
         &format!(
@@ -148,6 +170,7 @@ fn new_from_mdns(r: &Service) -> Result<Device, DiscoveryError> {
             r.domain().as_ref().ok_or(DiscoveryError::NoDomain)?
         ),
         r.port(),
+        &uid,
         device_type,
     ))
 }
@@ -162,6 +185,8 @@ pub enum DiscoveryError {
     NoHost,
     #[error("no domain discovered?")]
     NoDomain,
+    #[error("could not decode uid for host `{0}")]
+    NoUIDForHost(String),
     #[error("could not determine device type")]
     DeviceType,
     #[error("no device with name: `{0}` discovered")]

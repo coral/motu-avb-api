@@ -3,6 +3,8 @@ use crate::value::{Value, ValueError};
 use dashmap::DashMap;
 use rand::Rng;
 use reqwest::{header::HeaderValue, StatusCode};
+use serde::ser::{Serialize as SerializeImpl, SerializeStruct};
+use serde::{Deserialize, Serialize};
 use serde_json::Value as SerdeValue;
 use std::sync::Arc;
 use std::{collections::HashMap, fmt::Display};
@@ -10,17 +12,28 @@ use thiserror::Error;
 use tokio::sync::mpsc::{channel, Sender};
 
 #[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+struct ShadowDevice {
+    name: String,
+    hostname: String,
+    port: u16,
+    uid: String,
+    device_type: DeviceType,
+}
+
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Device {
     name: String,
     hostname: String,
     port: u16,
+    uid: String,
+    device_type: DeviceType,
 
     connected: bool,
 
     url: String,
     health: String,
-    device_type: DeviceType,
     client: reqwest::Client,
 
     conn_cancel: Option<Sender<()>>,
@@ -34,7 +47,28 @@ pub struct Device {
     client_id: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+impl SerializeImpl for Device {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("Device", 5)?;
+        state.serialize_field("name", &self.name)?;
+        state.serialize_field("hostname", &self.hostname)?;
+        state.serialize_field("port", &self.port)?;
+        state.serialize_field("uid", &self.uid)?;
+        state.serialize_field("device_type", &self.device_type)?;
+        state.end()
+    }
+}
+
+impl From<ShadowDevice> for Device {
+    fn from(v: ShadowDevice) -> Self {
+        Device::new(&v.name, &v.hostname, v.port, &v.uid, v.device_type)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum DeviceType {
     Host,
     Device,
@@ -134,13 +168,20 @@ impl PartialEq for Device {
 }
 
 impl Device {
-    pub fn new(name: &str, hostname: &str, port: u16, device_type: DeviceType) -> Device {
+    pub fn new(
+        name: &str,
+        hostname: &str,
+        port: u16,
+        uid: &str,
+        device_type: DeviceType,
+    ) -> Device {
         let mut rng = rand::thread_rng();
 
         Device {
             name: name.to_string(),
             hostname: hostname.to_string(),
             port,
+            uid: uid.to_string(),
 
             connected: false,
 
@@ -159,6 +200,11 @@ impl Device {
 
             client_id: rng.gen::<u32>(),
         }
+    }
+
+    pub fn from_json(json_data: &str) -> Result<Device, DeviceError> {
+        let shd: ShadowDevice = serde_json::from_str(json_data)?;
+        Ok(Device::from(shd))
     }
 
     pub fn name(&self) -> String {
@@ -417,8 +463,9 @@ impl Device {
         }
     }
 
-    pub fn uid(&self) -> Option<String> {
-        self.get_value("uid").map(Into::into)
+    pub fn uid(&self) -> &str {
+        //self.get_value("uid").map(Into::into)
+        &self.uid
     }
 }
 
