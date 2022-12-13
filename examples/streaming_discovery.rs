@@ -2,9 +2,7 @@ use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let d = motu_avb_api::streaming_discover(None);
-
-    let mut stream = d.await?;
+    let mut stream = motu_avb_api::streaming_discover(None).await?;
 
     loop {
         match stream.next().await {
