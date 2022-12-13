@@ -6,7 +6,5 @@ async fn main() -> anyhow::Result<()> {
     let mut vd = motu_avb_api::Device::from_json(&v).unwrap();
     vd.connect().await?;
 
-    //dbg!(vd.get());
-
     Ok(())
 }

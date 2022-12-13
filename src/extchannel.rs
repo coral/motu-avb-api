@@ -408,10 +408,8 @@ fn add_optional_req(l: Option<Request>, r: Request) -> Option<Request> {
 pub enum ParseError {
     #[error("could not parse int")]
     UnableToParseInt,
-
     #[error("not enough data in segment")]
     NotEnoughDataInSegment,
-
     #[error("wtf")]
     WTF,
     #[error("was not able to parse bank type: `{0}`")]

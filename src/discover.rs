@@ -4,6 +4,7 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::time::Duration;
 use thiserror::Error;
+use tokio_stream::wrappers::ReceiverStream;
 
 lazy_static! {
     static ref BOOL_MATCHER: Regex = Regex::new(r"MOTU Pro Audio HTTP Host: (.*)").unwrap();
@@ -76,10 +77,10 @@ pub async fn discover(timeout: Option<Duration>) -> Result<Vec<Device>, Discover
 #[allow(dead_code)]
 pub async fn streaming_discover(
     timeout: Option<Duration>,
-) -> Result<tokio::sync::mpsc::Receiver<Result<Device, DiscoveryError>>, DiscoveryError> {
+) -> Result<ReceiverStream<Result<Device, DiscoveryError>>, DiscoveryError> {
     let (tx, rx) = tokio::sync::mpsc::channel(10);
 
-    // Default duration of 10 secs
+    // Default duration of 20 secs
     let timeout = match timeout {
         Some(v) => v,
         None => Duration::from_secs(20),
@@ -137,7 +138,7 @@ pub async fn streaming_discover(
         }
     });
 
-    Ok(rx)
+    Ok(ReceiverStream::new(rx))
 }
 
 fn new_from_mdns(r: &Service) -> Result<Device, DiscoveryError> {
