@@ -13,7 +13,7 @@ use thiserror::Error;
 use tokio::sync::mpsc::{channel, Sender};
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Hash)]
 struct ShadowDevice {
     name: String,
     hostname: String,
@@ -69,7 +69,7 @@ impl From<ShadowDevice> for Device {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub enum DeviceType {
     Host,
     Device,
@@ -167,6 +167,8 @@ impl PartialEq for Device {
             && self.device_type == other.device_type
     }
 }
+
+impl Eq for Device {}
 
 impl Hash for Device {
     fn hash<H: Hasher>(&self, state: &mut H) {
