@@ -6,6 +6,7 @@ use reqwest::{header::HeaderValue, StatusCode};
 use serde::ser::{Serialize as SerializeImpl, SerializeStruct};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as SerdeValue;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::{collections::HashMap, fmt::Display};
 use thiserror::Error;
@@ -164,6 +165,14 @@ impl PartialEq for Device {
             && self.hostname == other.hostname
             && self.port == other.port
             && self.device_type == other.device_type
+    }
+}
+
+impl Hash for Device {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.hostname.hash(state);
+        self.port.hash(state);
+        self.uid.hash(state);
     }
 }
 
